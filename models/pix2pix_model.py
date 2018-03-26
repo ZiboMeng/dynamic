@@ -98,6 +98,11 @@ class Pix2PixModel(BaseModel):
 
     def forward(self):
         self.real_A = Variable(self.input_A)
+        self.fake_B = self.netG(self.real_A)
+        self.real_B = Variable(self.input_B)
+
+    def forward_single(self):
+        self.real_A = Variable(self.input_A)
         self.fake_B = self.netG(self.fake_input)
         self.fake_input = self.fake_B
         self.real_B = Variable(self.input_B)
