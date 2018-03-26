@@ -34,6 +34,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
             data = cur_data[i]
             model.set_input(data)
             model.forward()
+            model.optimize_parameters()
 
             if total_steps % opt.display_freq == 0:
                 save_result = total_steps % opt.update_html_freq == 0
@@ -47,11 +48,10 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
                     visualizer.plot_current_errors(epoch, float(epoch_iter)/dataset_size, opt, errors)
 
 
-        model.optimize_parameters()
-        if total_steps % opt.save_latest_freq == 0:
-            print('saving the latest model (epoch %d, total_steps %d)' %
-                (epoch, total_steps))
-            model.save('latest')
+            if total_steps % opt.save_latest_freq == 0:
+                print('saving the latest model (epoch %d, total_steps %d)' %
+                    (epoch, total_steps))
+                model.save('latest')
 
     if epoch % opt.save_epoch_freq == 0:
         print('saving the model at the end of epoch %d, iters %d' %
