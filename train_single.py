@@ -27,11 +27,12 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_iter += opt.batchSize
         # First element is the label of the current sequence
         model.set_label(int(cur_data[0]))
-        model.set_init_input(cur_data[1])
+        model.set_init_input(cur_data)
         model.init_lstm()
 
         #for i in range(1,len(cur_data)):
-        for i in range(1,3):
+        for i in range(1,9):
+            if i >= len(cur_data): break
             visualizer.reset()
             data = cur_data[i]
             model.set_input(data)
@@ -39,17 +40,17 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
             if total_steps % opt.display_freq == 0:
                 save_result = total_steps % opt.update_html_freq == 0
-                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result, i)
-            '''
+                visualizer.display_current_results(model.get_current_single_visuals(), epoch, save_result, i)
+            #'''
             if total_steps % opt.print_freq == 0:
                 errors = model.get_current_errors()
                 t = (time.time() - iter_start_time) / opt.batchSize
                 visualizer.print_current_errors(epoch, epoch_iter, errors, t)
                 if opt.display_id > 0:
                     visualizer.plot_current_errors(epoch, float(epoch_iter)/dataset_size, opt, errors)
-            '''
+            #'''
             
-        model.optimize_parameters()
+            model.optimize_parameters_single()
         if total_steps % opt.save_latest_freq == 0:
              print('saving the latest model (epoch %d, total_steps %d)' %
                  (epoch, total_steps))

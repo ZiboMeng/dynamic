@@ -61,10 +61,16 @@ class Pix2PixModel(BaseModel):
 
     def set_init_input(self, input):
         AtoB = self.opt.which_direction == 'AtoB'
-        input_A = input['A' if AtoB else 'B']
+        length = len(input) - 1
+        self.real_A = [0] * length
+        self.real_B = [0] * length
+        first = input[1]
+        input_A = first['A' if AtoB else 'B']
         if len(self.gpu_ids) > 0:
             input_A = input_A.cuda(self.gpu_ids[0], async=True)
-        self.fake_input = Variable(input_A)
+        self.fake_B = [0] * (length + 1)
+        self.fake_B[0] = Variable(input_A)
+        self.index = 0
 
 
     def set_input(self, input):
@@ -102,10 +108,11 @@ class Pix2PixModel(BaseModel):
         self.real_B = Variable(self.input_B)
 
     def forward_single(self):
-        self.real_A = Variable(self.input_A)
-        self.fake_B = self.netG(self.fake_input)
-        self.fake_input = self.fake_B
-        self.real_B = Variable(self.input_B)
+        self.real_A[self.index] = Variable(self.input_A)
+        self.fake_B[self.index + 1] = self.netG(self.fake_B[self.index])
+        #self.fake_input = self.fake_B
+        self.real_B[self.index] = Variable(self.input_B)
+        self.index += 1
 
     # no backprop gradients
     def test(self):
@@ -116,6 +123,25 @@ class Pix2PixModel(BaseModel):
     # get image paths
     def get_image_paths(self):
         return self.image_paths
+
+    def backward_single_D(self):
+        # Fake
+        # stop backprop to the generator by detaching fake_B
+        #print(self.real_A[self.index - 1])
+        fake_AB = self.fake_AB_pool.query(torch.cat((self.real_A[self.index - 1], self.fake_B[self.index]), 1).data)
+        pred_fake = self.netD(fake_AB.detach())
+        self.loss_D_fake = self.criterionGAN(pred_fake, False)
+
+        # Real
+        real_AB = torch.cat((self.real_A[self.index - 1], self.real_B[self.index - 1]), 1)
+        pred_real = self.netD(real_AB)
+        self.loss_D_real = self.criterionGAN(pred_real, True)
+
+        # Combined loss
+        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+
+        self.loss_D.backward(retain_graph=True)
+
 
     def backward_D(self):
         # Fake
@@ -134,6 +160,19 @@ class Pix2PixModel(BaseModel):
 
         self.loss_D.backward(retain_graph=True)
 
+    def backward_single_G(self):
+        # First, G(A) should fake the discriminator
+        fake_AB = torch.cat((self.real_A[self.index - 1], self.fake_B[self.index]), 1)
+        pred_fake = self.netD(fake_AB)
+        self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+
+        # Second, G(A) = B
+        self.loss_G_L1 = self.criterionL1(self.fake_B[self.index], self.real_B[self.index - 1]) * self.opt.lambda_A
+
+        self.loss_G = self.loss_G_GAN + self.loss_G_L1
+
+        self.loss_G.backward(retain_graph=True)
+
     def backward_G(self):
         # First, G(A) should fake the discriminator
         fake_AB = torch.cat((self.real_A, self.fake_B), 1)
@@ -146,6 +185,15 @@ class Pix2PixModel(BaseModel):
         self.loss_G = self.loss_G_GAN + self.loss_G_L1
 
         self.loss_G.backward(retain_graph=True)
+
+    def optimize_parameters_single(self):
+        self.optimizer_D.zero_grad()
+        self.backward_single_D()
+        self.optimizer_D.step()
+
+        self.optimizer_G.zero_grad()
+        self.backward_single_G()
+        self.optimizer_G.step()
 
     def optimize_parameters(self):
         self.optimizer_D.zero_grad()
@@ -162,6 +210,12 @@ class Pix2PixModel(BaseModel):
                             ('D_real', self.loss_D_real.data[0]),
                             ('D_fake', self.loss_D_fake.data[0])
                             ])
+
+    def get_current_single_visuals(self):
+        real_A = util.tensor2im(self.real_A[self.index - 1].data)
+        fake_B = util.tensor2im(self.fake_B[self.index].data)
+        real_B = util.tensor2im(self.real_B[self.index - 1].data)
+        return OrderedDict([('real_A', real_A), ('fake_B', fake_B), ('real_B', real_B)])
 
     def get_current_visuals(self):
         real_A = util.tensor2im(self.real_A.data)
