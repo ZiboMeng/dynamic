@@ -25,12 +25,11 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         total_steps += opt.batchSize
         epoch_iter += opt.batchSize
         # First element is the label of the current sequence
-        model.set_label(int(cur_data[0]))
-        model.set_init_input(cur_data[1])
-        model.init_lstm()
+        # model.set_label(int(cur_data[0]))
 
         visualizer.reset()
-        model.set_input(cur_data)
+        model.set_input_seq(cur_data)
+        model.init_lstm()
         model.forward()
 
         if total_steps % opt.display_freq == 0:

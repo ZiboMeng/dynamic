@@ -351,6 +351,8 @@ class LSTMBlock(nn.Module):
 
     def forward(self, input):     
         input = input.view(-1, 1, self.input_dim)
+        #print(input)
+        #print(self.exp)
         lstm_output, self.hidden = self.model(torch.cat((input, self.exp),2), self.hidden)
         #model_output1, self.hidden = self.model(self.exp, self.hidden)
         model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)

@@ -7,7 +7,7 @@ import util.util as util
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
-from networks import LSTMBlock
+#from networks import LSTMBlock
 import torch.nn as nn
 
 
@@ -77,6 +77,7 @@ class Pix2PixModel(BaseModel):
         AtoB = self.opt.which_direction == 'AtoB'
         input_A = input['A' if AtoB else 'B']
         input_B = input['B' if AtoB else 'A']
+        #print(input_A)
         if len(self.gpu_ids) > 0:
             input_A = input_A.cuda(self.gpu_ids[0], async=True)
             input_B = input_B.cuda(self.gpu_ids[0], async=True)
@@ -85,18 +86,30 @@ class Pix2PixModel(BaseModel):
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
     def set_input_seq(self, input):
+        # set label vector
+        self.len = len(input) - 1
+        label_template = [0] * self.exp_num
+        label_template[int(input[0])] = 1
+        self.label = [Variable(torch.FloatTensor(label_template)) for _ in range(self.len)]
+        self.label = torch.cat(self.label).view(self.len, 1, self.exp_num)
         AtoB = self.opt.which_direction == 'AtoB'
-        self.len = len(cur_data) - 1
         input_A = [0] * (self.len)
         input_B = [0] * (self.len)
         self.image_paths = [0] * (self.len)
-        for i in range(1, len(cur_data)):
+        c, h, w = input[1]['A'].size(1), input[1]['A'].size(2), input[1]['A'].size(3)
+        for i in range(1, self.len + 1):
             input_A[i-1] = input[i]['A' if AtoB else 'B']
             input_B[i-1] = input[i]['B' if AtoB else 'A']
-            self.image_paths = input['A_paths' if AtoB else 'B_paths']
+            self.image_paths = input[i]['A_paths' if AtoB else 'B_paths']
+        #print("Length of A is {} v.s. length of data is {}".format(len(input_A), self.len))
+        #print(input_A)
+        #print("c h w are {} {} {}".format(c, h, w))
+        input_A = torch.cat(input_A).view(len(input_A),c,h,w)
+        input_B = torch.cat(input_B).view(len(input_B),c,h,w)
         if len(self.gpu_ids) > 0:
             input_A = input_A.cuda(self.gpu_ids[0], async=True)
             input_B = input_B.cuda(self.gpu_ids[0], async=True)
+            self.label = self.label.cuda(self.gpu_ids[0], async=True)
         self.input_A = input_A
         self.input_B = input_B
 
@@ -120,7 +133,7 @@ class Pix2PixModel(BaseModel):
 
     def forward(self):
         self.real_A = Variable(self.input_A)
-        self.fake_B = self.netG(self.fake_input)
+        self.fake_B = self.netG(self.real_A)
         self.real_B = Variable(self.input_B)
 
     def forward_single(self):
@@ -213,16 +226,17 @@ class Pix2PixModel(BaseModel):
     def backward_D_seq(self):
         # Fake
         # stop backprop to the generator by detaching fake_B
-        fake_AB = [0] * self.len
-        for i in range(self.len):
-            fake_AB[i] = self.fake_AB_pool.query(torch.cat((self.real_A[i], self.fake_B[i]), 1).data)
+        # fake_AB = [0] * self.len
+        #for i in range(self.len):
+        #fake_AB[i] = self.fake_AB_pool.query(torch.cat((self.real_A[i], self.fake_B[i]), 1).data)
+        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
         pred_fake = self.netD(fake_AB.detach())
         self.loss_D_fake = self.criterionGAN(pred_fake, False)
 
         # Real
-        real_AB = [0] * self.len
-        for i in range(self.len):
-            real_AB[i] = torch.cat((self.real_A[i], self.real_B[i]), 1)
+        # real_AB = [0] * self.len
+        # for i in range(self.len):
+        real_AB = torch.cat((self.real_A, self.real_B), 1)
         pred_real = self.netD(real_AB)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
@@ -233,9 +247,9 @@ class Pix2PixModel(BaseModel):
 
     def backward_G_seq(self):
         # First, G(A) should fake the discriminator
-        fake_AB = [0] * self.len
-        for i in range(self.len):
-            fake_AB[i] = torch.cat((self.real_A[i], self.fake_B[i]), 1)
+        # fake_AB = [0] * self.len
+        # for i in range(self.len):
+        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
         pred_fake = self.netD(fake_AB)
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
@@ -256,13 +270,13 @@ class Pix2PixModel(BaseModel):
         self.optimizer_G.step()
 
     def optimize_parameters_seq(self):
-        self.optimizer_D_seq.zero_grad()
+        self.optimizer_D.zero_grad()
         self.backward_D_seq()
-        self.optimizer_D_seq.step()
+        self.optimizer_D.step()
 
-        self.optimizer_G_seq.zero_grad()
+        self.optimizer_G.zero_grad()
         self.backward_G_seq()
-        self.optimizer_G_seq.step()
+        self.optimizer_G.step()
 
     def get_current_errors(self):
         return OrderedDict([('G_GAN', self.loss_G_GAN.data[0]),
@@ -306,7 +320,7 @@ class Pix2PixModel(BaseModel):
 
     def init_lstm(self):
         for layer in self.netG.modules():
-            if isinstance(layer, LSTMBlock):
+            if isinstance(layer, networks.LSTMBlock):
                 layer.init_grad()
                 layer.init_hidden()
                 layer.set_label(self.label)

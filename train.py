@@ -26,7 +26,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_iter += opt.batchSize
         # First element is the label of the current sequence
         model.set_label(int(cur_data[0]))
-        model.set_init_input(cur_data[1])
+        #model.set_init_input(cur_data[1])
         model.init_lstm()
 
         for i in range(1,len(cur_data)):

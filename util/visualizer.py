@@ -97,6 +97,14 @@ class Visualizer():
                 webpage.add_images(ims, txts, links, width=self.win_size)
             webpage.save()
 
+    def display_current_results_seq(self, visuals, epoch, save_result):
+        if self.use_html and (save_result or not self.saved):  # save images to a html file
+            self.saved = True
+            for i, item in enumerate(visuals):
+                for label, image_numpy in item.items():
+                    img_path = os.path.join(self.img_dir, 'epoch%.3d_frame%s_%s.png' % (epoch, i, label))
+                    util.save_image(image_numpy, img_path)
+
     # errors: dictionary of error labels and values
     def plot_current_errors(self, epoch, counter_ratio, opt, errors):
         if not hasattr(self, 'plot_data'):
