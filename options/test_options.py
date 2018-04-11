@@ -10,6 +10,6 @@ class TestOptions(BaseOptions):
         self.parser.add_argument('--phase', type=str, default='', help='train, val, test, etc')
         self.parser.add_argument('--which_epoch', type=str, default='latest', help='which epoch to load? set to latest to use latest cached model')
         self.parser.add_argument('--how_many', type=int, default=1, help='how many test images to run')
-	self.parser.add_argument('--frames', type=int, default=25, help='how many frames to generate')
-	self.parser.add_argument('--expression', type=int, default=5, help='what expression to generate')
+        self.parser.add_argument('--frames', type=int, default=25, help='how many frames to generate')
+        self.parser.add_argument('--expression', type=int, default=5, help='what expression to generate')
         self.isTrain = False

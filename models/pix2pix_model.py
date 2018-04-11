@@ -91,7 +91,7 @@ class Pix2PixModel(BaseModel):
         label_template = [0] * self.exp_num
         label_template[int(input[0])] = 1
         self.label = [Variable(torch.FloatTensor(label_template)) for _ in range(self.len)]
-        self.label = torch.cat(self.label).view(self.len, 1, self.exp_num)
+        self.label = torch.cat(self.label).view(self.len, self.exp_num, 1, 1)
         AtoB = self.opt.which_direction == 'AtoB'
         input_A = [0] * (self.len)
         input_B = [0] * (self.len)
@@ -300,10 +300,12 @@ class Pix2PixModel(BaseModel):
 
     def get_current_visuals_seq(self):
         diction = [{}] * self.len
+        c, h, w = self.real_A.size(1), self.real_A.size(2), self.real_A.size(3)
+        #print(self.real_A[0])
         for i in range(self.len):
-            real_A = util.tensor2im(self.real_A.data)
-            fake_B = util.tensor2im(self.fake_B.data)
-            real_B = util.tensor2im(self.real_B.data)
+            real_A = util.tensor2im(self.real_A[i].view(1,c,h,w).data)
+            fake_B = util.tensor2im(self.fake_B[i].view(1,c,h,w).data)
+            real_B = util.tensor2im(self.real_B[i].view(1,c,h,w).data)
             diction[i] = OrderedDict([('real_A', real_A), ('fake_B', fake_B), ('real_B', real_B)])
         return diction
 

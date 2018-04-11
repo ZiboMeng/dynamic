@@ -311,7 +311,7 @@ class UnetGenerator(nn.Module):
 
         # construct unet structure
         lstm_block = LSTMBlock(ngf * 8, ngf * 8, num_exp, gpu_ids = self.gpu_ids)
-        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=lstm_block, norm_layer=norm_layer, innermost=True)
+        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, num_exp = num_exp, input_nc=None, submodule=lstm_block, norm_layer=norm_layer, innermost=True)
         for i in range(num_downs - 5):
             unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
@@ -333,7 +333,7 @@ class LSTMBlock(nn.Module):
         self.gpu_ids = gpu_ids
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.model = nn.LSTM(input_dim + num_exp, hidden_dim, layers)
+        self.model = nn.LSTM(input_dim, hidden_dim, layers)
 
     def init_hidden(self):
         if len(self.gpu_ids) > 0:
@@ -353,16 +353,19 @@ class LSTMBlock(nn.Module):
         input = input.view(-1, 1, self.input_dim)
         #print(input)
         #print(self.exp)
-        lstm_output, self.hidden = self.model(torch.cat((input, self.exp),2), self.hidden)
+        #lstm_output, self.hidden = self.model(torch.cat((input, self.exp),2), self.hidden)
+        lstm_output, self.hidden = self.model(input, self.hidden)
         #model_output1, self.hidden = self.model(self.exp, self.hidden)
         model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)
-        return model_output.clone()
+        #print(model_output)i
+        print(list(self.model.parameters()))
+        return torch.cat((model_output.clone(), self.exp),1)
 
 # Defines the submodule with skip connection.
 # X -------------------identity---------------------- X
 #   |-- downsampling -- |submodule| -- upsampling --|
 class UnetSkipConnectionBlock(nn.Module):
-    def __init__(self, outer_nc, inner_nc, input_nc=None,
+    def __init__(self, outer_nc, inner_nc, num_exp = None, input_nc=None,
                  submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
         super(UnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
@@ -387,7 +390,7 @@ class UnetSkipConnectionBlock(nn.Module):
             up = [uprelu, upconv, nn.Tanh()]
             model = down + [submodule] + up
         elif innermost:
-            upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
+            upconv = nn.ConvTranspose2d(inner_nc + num_exp, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=use_bias)
             down = [downrelu, downconv]

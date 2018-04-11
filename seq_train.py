@@ -34,7 +34,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
         if total_steps % opt.display_freq == 0:
             save_result = total_steps % opt.update_html_freq == 0
-            visualizer.display_current_results_seq(model.get_current_visuals_seq(), epoch, save_result, i)
+            visualizer.display_current_results_seq(model.get_current_visuals_seq(), epoch, save_result)
 
         if total_steps % opt.print_freq == 0:
             errors = model.get_current_errors()
