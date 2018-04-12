@@ -118,7 +118,7 @@ class Pix2PixModel(BaseModel):
         self.frames = frames
         input_A = input['A']
         if len(self.gpu_ids) > 0:
-            input_A = input_A.cuda(self.gpu_ids[0], async=True)
+            input_A = input_A.cuda(self.gpu_ids[0], async=True) 
         self.fake_B = [0] * self.frames
         self.fake_B[0] = Variable(input_A)
         self.image_paths = input['A_paths']
@@ -127,7 +127,7 @@ class Pix2PixModel(BaseModel):
         self.label = self.exp_num * [0]
         self.label[input] = 1
         self.label = Variable(torch.FloatTensor(self.label), requires_grad=False)#.cuda()
-        self.label = self.label.view(-1, 1, self.exp_num)
+        self.label = self.label.view(1, self.exp_num, 1,1)
         if len(self.gpu_ids) > 0:
             self.label = self.label.cuda(self.gpu_ids[0], async=True)
 

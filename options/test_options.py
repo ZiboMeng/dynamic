@@ -8,8 +8,8 @@ class TestOptions(BaseOptions):
         self.parser.add_argument('--results_dir', type=str, default='./results/', help='saves results here.')
         self.parser.add_argument('--aspect_ratio', type=float, default=1.0, help='aspect ratio of result images')
         self.parser.add_argument('--phase', type=str, default='', help='train, val, test, etc')
-        self.parser.add_argument('--which_epoch', type=str, default='latest', help='which epoch to load? set to latest to use latest cached model')
+        self.parser.add_argument('--which_epoch', type=str, default='200', help='which epoch to load? set to latest to use latest cached model')
         self.parser.add_argument('--how_many', type=int, default=1, help='how many test images to run')
         self.parser.add_argument('--frames', type=int, default=25, help='how many frames to generate')
-        self.parser.add_argument('--expression', type=int, default=5, help='what expression to generate')
+        self.parser.add_argument('--expression', type=int, default=2, help='what expression to generate')
         self.isTrain = False

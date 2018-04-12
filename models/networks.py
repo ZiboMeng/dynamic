@@ -358,7 +358,7 @@ class LSTMBlock(nn.Module):
         #model_output1, self.hidden = self.model(self.exp, self.hidden)
         model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)
         #print(model_output)i
-        print(list(self.model.parameters()))
+        #print(list(self.model.parameters()))
         return torch.cat((model_output.clone(), self.exp),1)
 
 # Defines the submodule with skip connection.
