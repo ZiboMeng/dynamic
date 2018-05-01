@@ -102,6 +102,7 @@ class Visualizer():
             self.saved = True
             for i, item in enumerate(visuals):
                 for label, image_numpy in item.items():
+                    #print(image_numpy)
                     img_path = os.path.join(self.img_dir, 'epoch%.3d_frame%s_%s.png' % (epoch, i, label))
                     util.save_image(image_numpy, img_path)
 

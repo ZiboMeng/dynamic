@@ -3,7 +3,7 @@ def create_model(opt):
     model = None
     print(opt.model)
     if opt.model == 'pix2pix':
-        assert(opt.dataset_mode == 'aligned')
+        #assert(opt.dataset_mode == 'aligned')
         from .pix2pix_model import Pix2PixModel
         model = Pix2PixModel()
     elif opt.model == 'test':

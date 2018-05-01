@@ -7,6 +7,11 @@ def CreateDataset(opt):
     if opt.dataset_mode == 'aligned':
         from data.aligned_dataset import AlignedDataset
         dataset = AlignedDataset()
+    elif opt.dataset_mode == 'landmark':
+        #from data.aligned_dataset import AlignedDataset
+        #dataset = AlignedDataset()
+        from data.lm_dataset import LandmarkDataset
+        dataset = LandmarkDataset()
     elif opt.dataset_mode == 'unaligned':
         from data.unaligned_dataset import UnalignedDataset
         dataset = UnalignedDataset()

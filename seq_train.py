@@ -31,6 +31,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         model.set_input_seq(cur_data)
         model.init_lstm()
         model.forward()
+        model.optimize_parameters_seq()
 
         if total_steps % opt.display_freq == 0:
             save_result = total_steps % opt.update_html_freq == 0
@@ -44,7 +45,6 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
                 visualizer.plot_current_errors(epoch, float(epoch_iter)/dataset_size, opt, errors)
 
 
-        model.optimize_parameters_seq()
         if total_steps % opt.save_latest_freq == 0:
             print('saving the latest model (epoch %d, total_steps %d)' %
                 (epoch, total_steps))

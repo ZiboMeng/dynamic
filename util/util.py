@@ -31,6 +31,15 @@ def diagnose_network(net, name='network'):
     print(name)
     print(mean)
 
+def rescale_landmarks(orig_w, target_w, orig_h, target_h, landmarks):
+    size = int(len(landmarks))
+    half = int(size/2)
+    for i in range(0, half):
+        landmarks[i] *= float(target_w) / float(orig_w)
+    for i in range(half, size):
+        landmarks[i] *= float(target_h) / float(orig_h)
+    return landmarks
+
 
 def save_image(image_numpy, image_path):
     image_pil = Image.fromarray(image_numpy)

@@ -100,7 +100,7 @@ def get_scheduler(optimizer, opt):
     return scheduler
 
 
-def define_G(input_nc, output_nc, ngf, num_exp, which_model_netG, norm='batch', use_dropout=False, init_type='normal', gpu_ids=[]):
+def define_G(input_nc, output_nc, ngf, num_exp, num_lm, which_model_netG, norm='batch', use_dropout=False, init_type='normal', gpu_ids=[]):
     netG = None
     use_gpu = len(gpu_ids) > 0
     norm_layer = get_norm_layer(norm_type=norm)
@@ -113,9 +113,9 @@ def define_G(input_nc, output_nc, ngf, num_exp, which_model_netG, norm='batch', 
     elif which_model_netG == 'resnet_6blocks':
         netG = ResnetGenerator(input_nc, output_nc, ngf, num_exp, norm_layer=norm_layer, use_dropout=use_dropout, n_blocks=6, gpu_ids=gpu_ids)
     elif which_model_netG == 'unet_128':
-        netG = UnetGenerator(input_nc, output_nc, 7, ngf, num_exp, norm_layer=norm_layer, use_dropout=use_dropout, gpu_ids=gpu_ids)
+        netG = UnetGenerator(input_nc, output_nc, 7, ngf, num_exp, num_lm, norm_layer=norm_layer, use_dropout=use_dropout, gpu_ids=gpu_ids)
     elif which_model_netG == 'unet_256':
-        netG = UnetGenerator(input_nc, output_nc, 8, ngf, num_exp, norm_layer=norm_layer, use_dropout=use_dropout, gpu_ids=gpu_ids)
+        netG = UnetGenerator(input_nc, output_nc, 8, ngf, num_exp, num_lm, norm_layer=norm_layer, use_dropout=use_dropout, gpu_ids=gpu_ids)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % which_model_netG)
     if len(gpu_ids) > 0:
@@ -304,13 +304,14 @@ class ResnetBlock(nn.Module):
 # if |num_downs| == 7, image of size 128x128 will become of size 1x1
 # at the bottleneck
 class UnetGenerator(nn.Module):
-    def __init__(self, input_nc, output_nc, num_downs, ngf=64, num_exp = 6, 
+    def __init__(self, input_nc, output_nc, num_downs, ngf=64, num_exp = 6, num_lm = 0, 
                  norm_layer=nn.BatchNorm2d, use_dropout=False, gpu_ids=[]):
         super(UnetGenerator, self).__init__()
         self.gpu_ids = gpu_ids
+        self.num_lm = num_lm
 
         # construct unet structure
-        lstm_block = LSTMBlock(ngf * 8, ngf * 8, num_exp, gpu_ids = self.gpu_ids)
+        lstm_block = LSTMBlock(ngf * 8, ngf * 8, num_exp, num_lm, gpu_ids = self.gpu_ids)
         unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, num_exp = num_exp, input_nc=None, submodule=lstm_block, norm_layer=norm_layer, innermost=True)
         for i in range(num_downs - 5):
             unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
@@ -323,16 +324,23 @@ class UnetGenerator(nn.Module):
 
     def forward(self, input):
         if self.gpu_ids and isinstance(input.data, torch.cuda.FloatTensor):
-            return nn.parallel.data_parallel(self.model, input, self.gpu_ids)
+            if self.num_lm:
+                return nn.parallel.data_parallel(self.model, input, self.gpu_ids), lstm_block.pred_landmarks
+            else:
+                return nn.parallel.data_parallel(self.model, input, self.gpu_ids)
         else:
-            return self.model(input)
+            if self.num_lm:
+                return self.model(input), lstm_block.pred_landmarks
+            else:
+                return self.model(input)
 
 class LSTMBlock(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_exp, layers = 1, gpu_ids=[]):
+    def __init__(self, input_dim, hidden_dim, num_exp, num_lm, layers = 1, gpu_ids=[]):
         super(LSTMBlock, self).__init__()
         self.gpu_ids = gpu_ids
         self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
+        self.num_lm = num_lm * 2
+        self.hidden_dim = hidden_dim + self.num_lm
         self.model = nn.LSTM(input_dim, hidden_dim, layers)
 
     def init_hidden(self):
@@ -343,8 +351,18 @@ class LSTMBlock(nn.Module):
             self.hidden = (Variable(torch.zeros(1, 1, self.hidden_dim)),
                         Variable(torch.zeros(1, 1, self.hidden_dim)))
 
-    def set_label(self, input):
-        self.exp = input
+    def set_label(self, label):
+        self.exp = label
+
+    def set_landmarks(self, cur_landmarks, next_landmarks):
+        self.cur = Variable(torch.FloatTensor(cur_landmarks))
+        self.cur = self.cur.view(-1, 1, self.num_lm)
+        print(self.cur)
+        self.next = Variable(torch.FloatTensor(next_landmarks))
+        self.next = self.next.view(-1, self.num_lm, 1, 1)
+        if self.gpu_ids:
+            self.next = self.next.cuda(self.gpu_ids[0], async=True)
+            self.cur = self.cur.cuda(self.gpu_ids[0], async=True)
 
     def init_grad(self):
         self.model.zero_grad()
@@ -354,12 +372,19 @@ class LSTMBlock(nn.Module):
         #print(input)
         #print(self.exp)
         #lstm_output, self.hidden = self.model(torch.cat((input, self.exp),2), self.hidden)
-        lstm_output, self.hidden = self.model(input, self.hidden)
         #model_output1, self.hidden = self.model(self.exp, self.hidden)
-        model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)
-        #print(model_output)i
-        #print(list(self.model.parameters()))
-        return torch.cat((model_output.clone(), self.exp),1)
+        if self.num_lm:
+            lstm_output.self.hidden = self.model(torch.cat((input, self.cur),2), self.hidden)
+            model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)
+            model_output, self.pred_landmarks = torch.split(model_output, self.hidden_dim - self.num_lm, dim=1)
+            #print(model_output)
+            #print(self.exp)
+            #print(list(self.model.parameters()))
+            return torch.cat((model_output.clone(), self.next, self.exp),1)
+        else:
+            lstm_output, self.hidden = self.model(input, self.hidden)
+            model_output = lstm_output.view(-1, self.hidden_dim, 1, 1)
+            return torch.cat((model_output.clone(), self.exp), 1)
 
 # Defines the submodule with skip connection.
 # X -------------------identity---------------------- X

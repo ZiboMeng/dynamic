@@ -20,9 +20,12 @@ class Pix2PixModel(BaseModel):
         self.exp_num = opt.exp_num
         self.label = self.exp_num * [0]
         self.isTrain = opt.isTrain
+        self.cur = []
+        self.next = []
+        self.num_lm = opt.lm_num
 
         # load/define networks
-        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, self.exp_num,
+        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, self.exp_num, self.num_lm,
                                       opt.which_model_netG, opt.norm, not opt.no_dropout, opt.init_type, self.gpu_ids)
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
@@ -40,6 +43,7 @@ class Pix2PixModel(BaseModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
             self.criterionL1 = torch.nn.L1Loss()
+            self.criterionMSE = torch.nn.MSELoss()
 
             # initialize optimizers
             self.schedulers = []
@@ -61,16 +65,34 @@ class Pix2PixModel(BaseModel):
 
     def set_init_input(self, input):
         AtoB = self.opt.which_direction == 'AtoB'
-        length = len(input) - 1
-        self.real_A = [0] * length
-        self.real_B = [0] * length
-        first = input[1]
-        input_A = first['A' if AtoB else 'B']
-        if len(self.gpu_ids) > 0:
-            input_A = input_A.cuda(self.gpu_ids[0], async=True)
-        self.fake_B = [0] * (length + 1)
-        self.fake_B[0] = Variable(input_A)
+        self.len = len(input) - 1
+        self.real_A = [0] * self.len
+        self.real_B = [0] * self.len
+        self.image_paths = [0] * self.len
+        self.c, self.h, self.w = input[1]['A'].size(1), input[1]['A'].size(2), input[1]['A'].size(3)
+        if self.num_lm:
+            self.cur = [0] * self.len
+            self.next = [0] * self.len
+            self.pred_landmarks = [0] * self.len
+        for i in range(1, self.len + 1):
+            self.real_A[i - 1] = input[i]['A' if AtoB else 'B']
+            self.real_B[i - 1] = input[i]['B' if AtoB else 'A']
+            self.image_paths[i - 1] = input[i]['A_paths' if AtoB else 'B_paths']
+            if self.num_lm:
+                self.cur[i - 1] = input[i]['A_lm']
+                self.next[i - 1] = input[i]['B_lm']
+        #print(self.real_A)
+        self.real_A = torch.cat(self.real_A).view(self.len, self.c, self.h, self.w)
+        self.real_B = torch.cat(self.real_B).view(self.len, self.c, self.h, self.w)
+        self.fake_B = [0] * (self.len + 1)
+        self.fake_B[0] = Variable(self.real_A[0].view(1, self.c, self.h, self.w))
         self.index = 0
+
+        if len(self.gpu_ids) > 0:
+            self.real_A = self.real_A.cuda(self.gpu_ids[0], async=True)
+            self.real_B = self.real_B.cuda(self.gpu_ids[0], async=True)
+            self.fake_B[0] = self.fake_B[0].cuda(self.gpu_ids[0], async=True)
+            self.label = self.label.cuda(self.gpu_ids[0], async=True)
 
 
     def set_input(self, input):
@@ -136,12 +158,40 @@ class Pix2PixModel(BaseModel):
         self.fake_B = self.netG(self.real_A)
         self.real_B = Variable(self.input_B)
 
+    def forward_single_with_landmarks(self):
+        #self.real_A[self.index] = Variable(self.input_A)
+        for i in range(self.len):
+            # Set landmarks
+            #print("set landmarks")
+            print(self.cur)
+            self.set_landmarks_lstm(self.cur[i], self.next[i])
+            #print(self.fake_B[i])
+            # We do not want the input to be treated as a response map
+            # Thus detach at the input
+            self.fake_B[i + 1], self.pred_landmarks[i] = self.netG(self.fake_B[i].detach())
+
+        self.fake_B = torch.cat(self.fake_B[1:]).view(self.len, self.c, self.h, self.w)
+        self.pred_landmarks = torch.cat(self.pred_landmarks).view(self.len, -1, 1, 1)
+        self.real_A = Variable(self.real_A)
+        self.real_B = Variable(self.real_B)
+
+
     def forward_single(self):
-        self.real_A[self.index] = Variable(self.input_A)
-        self.fake_B[self.index + 1] = self.netG(self.fake_B[self.index])
+        #self.real_A[self.index] = Variable(self.input_A)
+        for i in range(self.len):
+            #print(self.fake_B[i])
+            # We do not want the input to be treated as a response map
+            # Thus detach at the input
+            self.fake_B[i + 1] = self.netG(self.fake_B[i].detach())
+            
+        self.fake_B = torch.cat(self.fake_B[1:]).view(self.len, self.c, self.h, self.w)
+        self.real_A = Variable(self.real_A)
+        self.real_B = Variable(self.real_B)
+        #print(self.fake_B)
+        #print(self.real_A)
         #self.fake_input = self.fake_B
-        self.real_B[self.index] = Variable(self.input_B)
-        self.index += 1
+        #self.real_B[self.index] = Variable(self.input_B)
+        #self.index += 1
 
     # no backprop gradients
     def test(self):
@@ -157,12 +207,20 @@ class Pix2PixModel(BaseModel):
         # Fake
         # stop backprop to the generator by detaching fake_B
         #print(self.real_A[self.index - 1])
-        fake_AB = self.fake_AB_pool.query(torch.cat((self.real_A[self.index - 1], self.fake_B[self.index]), 1).data)
+        #self.real_A = torch.cat(real_A).view(self.len,self.c,self.h,self.w)
+        #self.fake_B = torch.cat(fake_B[1:]).view(self.len, self.c, self.h, self.w)
+        #print(torch.cat(self.real_A).view(self.len,self.c,self.h,self.w))
+        #print(torch.cat(self.fake_B[1:]).view(self.len,self.c,self.h,self.w))
+        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+        #fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+        #for i in range(1,3):
+        #    fake_AB = torch.cat((fake_AB, torch.cat((self.real_A, torch.cat((self.fake_B[i:], self.fake_B[0:i]), 0)), 1)), 0)
         pred_fake = self.netD(fake_AB.detach())
         self.loss_D_fake = self.criterionGAN(pred_fake, False)
 
         # Real
-        real_AB = torch.cat((self.real_A[self.index - 1], self.real_B[self.index - 1]), 1)
+        #self.real_B = torch.cat(real_B).view(self.len, self.c, self.h, self.w)
+        real_AB = torch.cat((self.real_A, self.real_B), 1)
         pred_real = self.netD(real_AB)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
@@ -189,16 +247,41 @@ class Pix2PixModel(BaseModel):
 
         self.loss_D.backward(retain_graph=True)
 
-    def backward_single_G(self):
+
+    def backward_single_with_landmarks_G(self):
         # First, G(A) should fake the discriminator
-        fake_AB = torch.cat((self.real_A[self.index - 1], self.fake_B[self.index]), 1)
+        #self.real_A = torch.cat(self.real_A).view(self.len,self.c,self.h,self.w)
+        #self.fake_B = torch.cat(self.fake_B[1:]).view(self.len, self.c, self.h, self.w)
+        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+        #print(fake_AB)
         pred_fake = self.netD(fake_AB)
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
         # Second, G(A) = B
-        self.loss_G_L1 = self.criterionL1(self.fake_B[self.index], self.real_B[self.index - 1]) * self.opt.lambda_A
+        self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_A
+
+        #self.loss_G_MSE = self.criterionMSE(self.pred_landmarks, torch.cat(self.next).view(self.len, -1, 1, 1))
 
         self.loss_G = self.loss_G_GAN + self.loss_G_L1
+        #self.loss_G = self.loss_G_GAN
+
+        self.loss_G.backward(retain_graph=True)
+
+
+    def backward_single_G(self):
+        # First, G(A) should fake the discriminator
+        #self.real_A = torch.cat(self.real_A).view(self.len,self.c,self.h,self.w)
+        #self.fake_B = torch.cat(self.fake_B[1:]).view(self.len, self.c, self.h, self.w)
+        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+        #print(fake_AB)
+        pred_fake = self.netD(fake_AB)
+        self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+
+        # Second, G(A) = B
+        self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_A
+
+        self.loss_G = self.loss_G_GAN + self.loss_G_L1
+        #self.loss_G = self.loss_G_GAN
 
         self.loss_G.backward(retain_graph=True)
 
@@ -223,6 +306,7 @@ class Pix2PixModel(BaseModel):
         self.optimizer_G.zero_grad()
         self.backward_single_G()
         self.optimizer_G.step()
+
     def backward_D_seq(self):
         # Fake
         # stop backprop to the generator by detaching fake_B
@@ -230,6 +314,7 @@ class Pix2PixModel(BaseModel):
         #for i in range(self.len):
         #fake_AB[i] = self.fake_AB_pool.query(torch.cat((self.real_A[i], self.fake_B[i]), 1).data)
         fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+        #print(fake_AB)
         pred_fake = self.netD(fake_AB.detach())
         self.loss_D_fake = self.criterionGAN(pred_fake, False)
 
@@ -304,6 +389,7 @@ class Pix2PixModel(BaseModel):
         #print(self.real_A[0])
         for i in range(self.len):
             real_A = util.tensor2im(self.real_A[i].view(1,c,h,w).data)
+            #print(self.real_A[i])
             fake_B = util.tensor2im(self.fake_B[i].view(1,c,h,w).data)
             real_B = util.tensor2im(self.real_B[i].view(1,c,h,w).data)
             diction[i] = OrderedDict([('real_A', real_A), ('fake_B', fake_B), ('real_B', real_B)])
@@ -326,3 +412,8 @@ class Pix2PixModel(BaseModel):
                 layer.init_grad()
                 layer.init_hidden()
                 layer.set_label(self.label)
+
+    def set_landmarks_lstm(self, cur, next):
+        for layer in self.netG.modules():
+            if isinstance(layer, networks.LSTMBlock):
+                layer.set_landmarks(cur, next)
